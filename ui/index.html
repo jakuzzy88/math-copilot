@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Math Copilot — Solve linear equations step by step with detailed explanations.">
+  <title>Math Copilot — Equation Solver</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Header -->
+    <header class="app-header">
+      <div class="logo">
+        <span class="logo-icon">∑</span>
+        <h1>Math Copilot</h1>
+      </div>
+      <p class="subtitle">Linear equation solver with step-by-step explanations</p>
+    </header>
+
+    <!-- Input Section -->
+    <section class="input-section" id="input-section">
+      <div class="input-card">
+        <label for="equation-input" class="input-label">Enter an equation</label>
+        <div class="input-row">
+          <input
+            type="text"
+            id="equation-input"
+            class="equation-input"
+            placeholder="e.g. 3x + 4 = 10"
+            autocomplete="off"
+            spellcheck="false"
+          >
+          <button id="solve-btn" class="solve-btn">
+            <span class="btn-text">Solve</span>
+            <span class="btn-icon">→</span>
+          </button>
+        </div>
+        <div class="quick-examples">
+          <span class="examples-label">Try:</span>
+          <button class="example-btn" data-eq="2x+5=13">2x+5=13</button>
+          <button class="example-btn" data-eq="3(x+2)=15">3(x+2)=15</button>
+          <button class="example-btn" data-eq="x/4=8">x/4=8</button>
+          <button class="example-btn" data-eq="-5x+20=0">-5x+20=0</button>
+          <button class="example-btn" data-eq="7x-3=18">7x-3=18</button>
+        </div>
+        <div id="error-msg" class="error-msg hidden"></div>
+      </div>
+    </section>
+
+    <!-- Results Section -->
+    <section id="results-section" class="results-section hidden">
+      <!-- Solution Card -->
+      <div class="solution-card" id="solution-card">
+        <div class="solution-header">
+          <span class="solution-label">Solution</span>
+          <span class="solution-value" id="solution-value"></span>
+        </div>
+      </div>
+
+      <!-- Tabs -->
+      <div class="tabs">
+        <button class="tab active" data-tab="steps" id="tab-steps">
+          <span class="tab-icon">📝</span> Steps
+        </button>
+        <button class="tab" data-tab="ast" id="tab-ast">
+          <span class="tab-icon">🌳</span> Parse Tree
+        </button>
+        <button class="tab" data-tab="log" id="tab-log">
+          <span class="tab-icon">📋</span> Action Log
+        </button>
+      </div>
+
+      <!-- Tab Content: Steps -->
+      <div class="tab-content active" id="content-steps">
+        <div id="steps-container" class="steps-container"></div>
+      </div>
+
+      <!-- Tab Content: AST -->
+      <div class="tab-content" id="content-ast">
+        <div class="ast-container">
+          <pre id="ast-output" class="code-block"></pre>
+        </div>
+      </div>
+
+      <!-- Tab Content: Action Log -->
+      <div class="tab-content" id="content-log">
+        <div class="log-container">
+          <table id="log-table" class="log-table">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Action</th>
+                <th>Description</th>
+                <th>Equation State</th>
+              </tr>
+            </thead>
+            <tbody id="log-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="app-footer">
+      <p>Offline Handwritten Math Copilot — Sprint B</p>
+    </footer>
+  </div>
+
+  <script src="solver.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

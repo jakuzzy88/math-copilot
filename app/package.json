@@ -1,0 +1,26 @@
+{
+  "name": "math-copilot-app",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Offline Handwritten Math Copilot – React Native app",
+  "main": "src/index.ts",
+  "scripts": {
+    "test": "jest --verbose",
+    "test:watch": "jest --watch",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "math",
+    "handwriting",
+    "offline",
+    "react-native"
+  ],
+  "license": "MIT",
+  "devDependencies": {
+    "@types/jest": "^30.0.0",
+    "jest": "^30.4.2",
+    "ts-jest": "^29.4.11",
+    "ts-node": "^10.9.2",
+    "typescript": "^6.0.3"
+  }
+}
