@@ -24,7 +24,8 @@
       "@diagnostics/*": ["src/diagnostics/*"],
       "@pipeline/*": ["src/pipeline/*"],
       "@inference/*": ["src/inference/*"],
-      "@ui/*": ["src/ui/*"]
+      "@ui/*": ["src/ui/*"],
+      "@screens/*": ["src/screens/*"]
     },
     "ignoreDeprecations": "6.0"
   },

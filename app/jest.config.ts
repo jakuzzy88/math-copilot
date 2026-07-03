@@ -14,6 +14,7 @@ const config: Config = {
     '^@pipeline/(.*)$': '<rootDir>/src/pipeline/$1',
     '^@inference/(.*)$': '<rootDir>/src/inference/$1',
     '^@ui/(.*)$': '<rootDir>/src/ui/$1',
+    '^@screens/(.*)$': '<rootDir>/src/screens/$1',
   },
   transform: {
     '^.+\\.tsx?$': ['ts-jest', {
