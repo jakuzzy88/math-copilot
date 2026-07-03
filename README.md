@@ -73,7 +73,7 @@ Camera Frame
 | **CNN-CTC Training Pipeline** (`training/`) | PyTorch-based training loop with CTC loss, cosine annealing, online augmentation, early stopping, and comprehensive evaluation/debug tooling. |
 | **Evaluation & Debug Tools** (`training/`) | Per-form accuracy analysis, character confusion matrices, worst-prediction reports, and training run summaries. |
 | **Local UI Prototype** (`ui/`) | Static HTML/CSS/JS browser demo of the solver and explanation engine. No camera — type an equation, see the solution and steps. |
-| **Future Mobile App** | React Native app with on-device ONNX/TFLite inference and live camera feed. The Math Core and pipeline are designed for this target. |
+| **Mobile App** (`app/`) | React Native app shell with Android native project. Currently runs in demo mode with UI overlays, guide box, and explanation display. Real camera and ONNX inference are next. |
 
 ---
 
@@ -81,15 +81,20 @@ Camera Frame
 
 ```
 math-copilot/
-├── app/                          # TypeScript Math Core + pipeline
+├── app/                          # React Native app + TypeScript Math Core
 │   ├── src/
 │   │   ├── parser/               #   Tokeniser, parser, AST definitions
 │   │   ├── solver/               #   Linear solver, simplifier, action log
 │   │   ├── explanation/          #   Pedagogical explanation engine
 │   │   ├── grammar/              #   Grammar validator
 │   │   ├── pipeline/             #   OCR candidate pipeline, stability aggregator
+│   │   ├── inference/            #   Camera frame processing, ONNX stubs
+│   │   ├── ui/                   #   UI state adapter, overlay components
+│   │   ├── screens/              #   MathCameraScreen, real-mode stubs
 │   │   ├── diagnostics/          #   Runtime diagnostic utilities
-│   │   └── __tests__/            #   Jest test suite
+│   │   └── __tests__/            #   Jest test suite (387 tests)
+│   ├── android/                  #   Android native project (Gradle, Kotlin)
+│   ├── index.js                  #   React Native entry point
 │   ├── package.json
 │   └── tsconfig.json
 │
@@ -320,6 +325,96 @@ Then open [http://localhost:8080](http://localhost:8080).
 - `5x-2=18`
 - `x/2=5`
 - `2(x+1)=10`
+
+---
+
+## Android App — Build & Deploy to Phone
+
+The app can be built as a standalone APK and installed on any Android phone. It currently runs in **demo mode** (fake OCR, placeholder camera) — no real camera or model required.
+
+### Prerequisites
+
+| Requirement | Notes |
+|---|---|
+| Node.js 18+ | |
+| Java 17 (OpenJDK) | `java -version` to check |
+| Android SDK | Via [Android Studio](https://developer.android.com/studio) |
+| `ANDROID_HOME` env var | Set to your SDK path (e.g. `~/Android/Sdk`) |
+| USB debugging on phone | Enable in phone's Developer Options |
+| ADB | Comes with Android SDK, verify with `adb devices` |
+
+### Build Offline Release APK (recommended)
+
+This creates a standalone APK that runs without a computer connected:
+
+```bash
+cd app
+npm install               # first time only
+npm run build:release-apk # bundles JS + builds release APK
+```
+
+The APK is created at:
+
+```
+app/android/app/build/outputs/apk/release/app-release.apk
+```
+
+### Install on Phone
+
+Connect your phone via USB, then:
+
+```bash
+# Verify device is connected:
+adb devices
+
+# Install the APK:
+adb install -r android/app/build/outputs/apk/release/app-release.apk
+
+# Launch:
+adb shell am start -n com.mathcopilot/.MainActivity
+```
+
+Or simply tap the **MathCopilot** icon in your phone's app launcher.
+
+### Debug Build (with Metro hot-reload)
+
+For development with live code reloading:
+
+```bash
+# Terminal 1 — start Metro bundler:
+cd app
+npm start
+
+# Terminal 2 — build, install, and launch:
+cd app
+npm run android
+
+# If the app shows a white screen, forward the port:
+adb reverse tcp:8081 tcp:8081
+```
+
+### Available Scripts
+
+| Script | What It Does |
+|---|---|
+| `npm start` | Start Metro dev server |
+| `npm run android` | Debug build + install (requires Metro) |
+| `npm run bundle:android` | Bundle JS for release |
+| `npm run assemble:release` | Gradle release build |
+| `npm run build:release-apk` | **One-command offline APK** (bundle + build) |
+| `npm test` | Run Jest test suite |
+
+### Troubleshooting
+
+| Problem | Fix |
+|---|---|
+| `adb devices` empty | Enable USB debugging in Developer Options |
+| Device shows "unauthorized" | Accept the USB debugging prompt on phone |
+| "Unable to load script" | You're running the debug APK without Metro — use `build:release-apk` instead |
+| White screen with Metro running | Run `adb reverse tcp:8081 tcp:8081` |
+| Gradle build fails | Check `java -version` shows 17, and `ANDROID_HOME` is set |
+
+> ⚠️ **The release APK uses a debug keystore for local testing only.** Replace with proper release signing before publishing. See [React Native Signed APK docs](https://reactnative.dev/docs/signed-apk-android).
 
 ---
 
@@ -639,6 +734,8 @@ Quick-start checklist for a new contributor:
 - [ ] Run Python tests: `python3 -m pytest training/tests/ -v`
 - [ ] Run app tests: `cd app && npm test`
 - [ ] Open the UI demo: `ui/index.html`
+- [ ] Build Android APK: `cd app && npm run build:release-apk`
+- [ ] Install on phone: `adb install -r android/app/build/outputs/apk/release/app-release.apk`
 - [ ] Generate synthetic dataset: `build_synthetic_dataset.py`
 - [ ] Verify dataset: `verify_synthetic_dataset.py`
 - [ ] Run smoke training: `train_ctc.py --smoke-test`
