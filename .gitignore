@@ -14,6 +14,24 @@ yarn-error.log*
 .expo/
 dist/
 build/
+.bundle/
+tmp_rn_scaffold/
+
+# Android build artifacts
+app/android/app/build/
+app/android/app/.cxx/
+app/android/build/
+app/android/.gradle/
+app/android/app/release/
+*.apk
+*.aab
+local.properties
+
+# Generated JS bundle and assets (created by 'react-native bundle')
+app/android/app/src/main/assets/index.android.bundle
+app/android/app/src/main/assets/index.android.bundle.map
+app/android/app/src/main/res/drawable-*
+app/android/app/src/main/res/raw/
 
 # Training generated data and model artifacts
 training/datasets/
