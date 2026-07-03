@@ -447,6 +447,7 @@ npx react-native run-ios
 | 5F | Live OCR loop with StabilityAggregator integration | ✅ Complete |
 | 6A | UI overlay integration | ✅ Complete |
 | 6B | React Native camera shell + demo overlay | ✅ Complete |
+| 7A | Android native project scaffolding + demo mode phone run | ✅ Complete |
 
 ---
 
@@ -1070,3 +1071,162 @@ npm run android
 | `jest.config.ts` | **Modified** | Added @screens/* module mapping |
 | `docs/mobile_inference_plan.md` | **Updated** | This document |
 
+---
+
+## 19. Sprint 7A: Android Native Project Scaffolding + Demo Mode Phone Run
+
+### Overview
+
+Sprint 7A adds the Android native project to the React Native app,
+making it possible to build, install, and run the Math Copilot demo
+on a real Android phone.
+
+### Key Decisions
+
+- **Generated from RN CLI template** — Used `@react-native-community/cli init`
+  with `--version 0.86.0 --package-name com.mathcopilot` to generate a
+  compatible Android project, then copied `android/` into the app.
+- **Native modules disabled for demo** — Both `onnxruntime-react-native`
+  and `react-native-vision-camera` are excluded from autolinking via
+  `react-native.config.js` because:
+  1. `onnxruntime-react-native` has a Gradle 9.x compatibility issue.
+  2. Neither is needed for demo mode.
+  3. They will be re-enabled when real OCR integration begins.
+- **DEMO_MODE = true** — The app runs with a fake recognizer and
+  placeholder camera preview. No real OCR or camera frames.
+
+### Android Project Details
+
+| Property | Value |
+|----------|-------|
+| Package ID | `com.mathcopilot` |
+| App name | `MathCopilot` |
+| Min SDK | 24 (Android 7.0) |
+| Target SDK | 36 |
+| Compile SDK | 36 |
+| Kotlin version | 2.1.20 |
+| Gradle version | 9.3.1 |
+| New Architecture | Enabled |
+| Hermes engine | Enabled |
+
+### Permissions
+
+| Permission | Purpose |
+|-----------|--------|
+| `INTERNET` | Metro bundler debug connection (RN default) |
+| `CAMERA` | Prepared for future camera preview |
+
+### Build & Install Verification
+
+| Step | Result |
+|------|--------|
+| `./gradlew tasks` | ✅ BUILD SUCCESSFUL |
+| `./gradlew assembleDebug` | ✅ BUILD SUCCESSFUL (1m 54s) |
+| APK size | 112 MB (debug, all architectures) |
+| `./gradlew installDebug` | ✅ Installed on moto g56 5G |
+| Metro bundle served | ✅ 779 modules bundled |
+| App launched on device | ✅ Activity started |
+| Jest tests | ✅ 387 passed, 24 suites |
+
+### How to Run on Android Phone
+
+#### Prerequisites
+
+1. **Node.js 18+** installed.
+2. **Android Studio** with Android SDK installed.
+3. **Java 17** (OpenJDK recommended).
+4. **`ANDROID_HOME`** environment variable set to SDK location.
+5. **USB debugging** enabled on the Android device.
+6. Device connected via USB and visible in `adb devices`.
+
+#### First-Time Setup
+
+```bash
+# 1. Install JS dependencies.
+cd math-copilot/app
+npm install
+
+# 2. Verify device is connected.
+adb devices
+# Should show your device as "device" (not "unauthorized").
+```
+
+#### Build & Run
+
+```bash
+# Terminal 1: Start Metro bundler.
+cd math-copilot/app
+npm start
+
+# Terminal 2: Build, install, and launch.
+cd math-copilot/app
+npm run android
+
+# Alternative: Manual build + install.
+cd math-copilot/app/android
+./gradlew installDebug
+adb reverse tcp:8081 tcp:8081
+adb shell am start -n com.mathcopilot/.MainActivity
+```
+
+#### Troubleshooting
+
+| Problem | Solution |
+|---------|----------|
+| `adb devices` shows nothing | Enable USB debugging in Developer Options |
+| Device shows "unauthorized" | Accept the USB debugging prompt on the phone |
+| App shows white screen | Run `adb reverse tcp:8081 tcp:8081` and restart |
+| Metro not found by device | Ensure `adb reverse tcp:8081 tcp:8081` is run |
+| Gradle version mismatch | Use Java 17 (`java -version` to check) |
+| Build fails at autolinking | Check `react-native.config.js` disables problematic modules |
+
+### Expected Demo UI on Phone
+
+When the app loads in demo mode:
+
+1. Black background with dark purple camera placeholder.
+2. "📸 Camera preview (demo mode)" text centered.
+3. Orange "DEMO MODE" badge in the top-right corner.
+4. Mode indicator (green dot + "STABLE") in the top-left.
+5. 4:1 green-bordered guide box overlay in the center.
+6. "Equation recognized: 3x+4=10" status text below the guide box.
+7. Green solution card showing:
+   - `3x+4=10`
+   - `→ x=2`
+   - `Confidence: 90.0% · HIGH`
+8. "▶ Show Diagnostics" toggle at the bottom.
+
+### Known Limitations
+
+1. **Demo mode only** — `DEMO_MODE = true`, no real camera or OCR.
+2. **Native modules disabled** — `onnxruntime-react-native` and
+   `react-native-vision-camera` are excluded from the Android build.
+3. **No production signing** — Uses the default debug keystore.
+4. **Debug APK is large** — 112 MB includes all 4 CPU architectures.
+   Production release with ABI splitting would be ~30 MB.
+5. **No iOS project** — Only Android is scaffolded.
+6. **Metro DevTools error** — The Chrome sandbox error in Metro output
+   is cosmetic and does not affect the app.
+
+### Files Added/Modified
+
+| File | Action | Description |
+|------|--------|-------------|
+| `android/` (entire directory) | **New** | Android native project (Gradle, Kotlin, manifests) |
+| `android/app/src/main/AndroidManifest.xml` | **Modified** | Added CAMERA permission |
+| `android/settings.gradle` | **Modified** | Set rootProject.name to 'MathCopilot' |
+| `react-native.config.js` | **New** | Disables ONNX and VisionCamera autolinking |
+| `app.json` | **New** | App name configuration for RN CLI |
+| `package.json` | **Modified** | Added RN CLI dev dependencies |
+| `.gitignore` | **Modified** | Added Android build artifact patterns |
+| `docs/mobile_inference_plan.md` | **Updated** | This document |
+
+### Next Sprint: 7B — Real Camera Preview
+
+| Task | Description |
+|------|-------------|
+| Re-enable `react-native-vision-camera` | Fix autolinking, resolve native build |
+| Live camera preview | Replace placeholder with real camera feed |
+| Camera permission flow | Test the permission request on device |
+| Frame rate benchmarking | Measure capture interval on real hardware |
+| Guide box positioning | Verify 4:1 overlay aligns with camera frame |

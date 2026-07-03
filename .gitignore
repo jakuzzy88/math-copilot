@@ -14,6 +14,18 @@ yarn-error.log*
 .expo/
 dist/
 build/
+.bundle/
+tmp_rn_scaffold/
+
+# Android build artifacts
+app/android/app/build/
+app/android/app/.cxx/
+app/android/build/
+app/android/.gradle/
+app/android/app/release/
+*.apk
+*.aab
+local.properties
 
 # Training generated data and model artifacts
 training/datasets/
