@@ -444,7 +444,7 @@ npx react-native run-ios
 | 5C | TypeScript types, decoder, preprocessor, interfaces, fake tests | ✅ Complete |
 | 5D | Install `onnxruntime-react-native`, real inference implementation, mock tests | ✅ Complete |
 | 5E | Camera frame capture + crop + resize pipeline | ✅ Complete |
-| 5F | Live OCR with StabilityAggregator integration | 🔜 Next |
+| 5F | Live OCR loop with StabilityAggregator integration | ✅ Complete |
 | 6A | TFLite conversion evaluation | 🔜 Planned |
 
 ---
@@ -555,4 +555,185 @@ const result2 = processFrame(frame, {
 | `src/__tests__/cameraFrameProvider.test.ts` | **New** | 10 tests for frame provider |
 | `src/__tests__/framePipeline.test.ts` | **New** | 19 tests for end-to-end pipeline |
 | `docs/mobile_inference_plan.md` | **Updated** | This document |
+
+---
+
+## 16. Sprint 5F: Live OCR Loop with StabilityAggregator Integration
+
+### Overview
+
+Sprint 5F wires the frame preprocessing pipeline (Sprint 5E) into a live-style
+recognition loop that connects all previously-built components end-to-end:
+
+```
+CameraFrameProvider → processFrame() → recognizeAndSolve() → StabilityAggregator → stable UI-ready result
+```
+
+The `LiveRecognitionController` orchestrates this entire pipeline at a
+configurable frame interval, with built-in busy-frame protection, error
+isolation, and comprehensive diagnostics.
+
+### Architecture
+
+```
+┌──────────────────────┐
+│ CameraFrameProvider  │  RGBA frames at configurable interval
+│ (device / synthetic) │
+└──────┬───────────────┘
+       │ captureFrame()
+       ▼
+┌──────────────────────┐
+│ framePipeline.ts     │  RGBA → grayscale → crop → resize → normalize
+│ processFrame()       │  → StaticRecognizerInput (128×512 Float32)
+└──────┬───────────────┘
+       │
+       ▼
+┌──────────────────────┐
+│ recognizeAndSolve()  │  ONNX inference → CTC decode → solve pipeline
+│ recognizer + pipeline│  → PipelineResult (accepted/rejected)
+└──────┬───────────────┘
+       │
+       ▼
+┌──────────────────────────┐
+│ StabilityAggregator      │  sliding window → agreement check
+│ addFrame(pipelineResult) │  → StableRecognitionResult
+└──────┬───────────────────┘
+       │
+       ▼
+┌──────────────────────────┐
+│ onStableResult callback  │  → UI overlay (Sprint 6+)
+└──────────────────────────┘
+```
+
+### Interval Strategy
+
+- **Default interval:** 250 ms (4 fps).
+- **Configurable** via `intervalMs` option.
+- The interval is a timer-based loop using `setInterval`.
+- On slow devices, the interval can be increased (e.g. 500 ms) to reduce
+  CPU/GPU pressure.
+- On fast devices, it can be decreased (e.g. 100 ms) for more responsive
+  recognition.
+
+### Why Busy Frames Are Skipped (Not Queued)
+
+When a frame is still being processed and a new interval fires, the new
+frame is **skipped** rather than queued. Reasons:
+
+1. **Backlog prevention:** Queuing frames on a slow device would create an
+   ever-growing backlog, increasing latency and memory pressure.
+2. **Freshness:** Older queued frames are stale — the user may have moved
+   the camera. Processing the newest available frame is always better.
+3. **Predictability:** The controller processes at most one frame at a
+   time, making timing diagnostics reliable and reproducible.
+4. **Simplicity:** No queue management, no priority logic, no memory
+   bounds to configure.
+
+Skipped frames are tracked in `diagnostics.framesSkippedBusy` for
+monitoring.
+
+### How Stability Prevents Flicker
+
+The `StabilityAggregator` (Sprint E) maintains a sliding window of recent
+pipeline results. A stable equation is only emitted when:
+
+1. The **same equation string** appears at least `minAgreement` times in
+   the window (default: 3).
+2. The **average confidence** across those frames meets the threshold
+   (default: 0.65).
+3. If the current window does not meet stability criteria, the **last
+   stable result is retained** (flicker prevention).
+
+This prevents the UI from jumping between different equations or showing
+transient misreads.
+
+### Diagnostics Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `framesSeen` | number | Total frames seen (including skipped) |
+| `framesProcessed` | number | Frames fully processed through the pipeline |
+| `framesSkippedBusy` | number | Frames skipped due to busy processing |
+| `framesFailedPreprocessing` | number | Frames that failed during crop/resize |
+| `framesFailedRecognition` | number | Frames that failed during ONNX inference |
+| `framesRejectedByPipeline` | number | Frames rejected by the solve pipeline |
+| `stableResultsEmitted` | number | Stable results sent to the callback |
+| `lastRawText` | string \| null | Raw OCR text from the last recognition |
+| `lastStableEquation` | string \| null | Last stable equation string |
+| `averagePreprocessMs` | number | Running average preprocessing time |
+| `averageRecognitionMs` | number | Running average recognition time |
+| `averageTotalMs` | number | Running average total frame time |
+
+### Usage
+
+```typescript
+import { LiveRecognitionController } from './inference/liveRecognitionController';
+import { StaticFrameProvider } from './inference/cameraFrameProvider';
+import { OnnxEquationRecognizer } from './inference/staticImageRecognizer';
+
+// 1. Create dependencies.
+const frameProvider = new StaticFrameProvider([...frames]);
+const recognizer = await OnnxEquationRecognizer.create(modelPath);
+
+// 2. Create and start controller.
+const controller = new LiveRecognitionController({
+  frameProvider,
+  recognizer,
+  intervalMs: 250,
+  onStableResult: (result) => {
+    if (result.stable) {
+      console.log(`Stable: ${result.equation} → ${result.solution}`);
+      updateUI(result);
+    }
+  },
+  onError: (error, context) => {
+    console.warn(`[${context}] ${error.message}`);
+  },
+});
+
+controller.start();
+
+// 3. Check diagnostics periodically.
+setInterval(() => {
+  const diag = controller.getDiagnostics();
+  console.log(`Processed: ${diag.framesProcessed}, Stable: ${diag.lastStableEquation}`);
+}, 2000);
+
+// 4. Clean up.
+controller.stop();
+await controller.dispose();
+```
+
+### Error Isolation
+
+Errors at each pipeline stage are caught individually:
+
+| Stage | Diagnostic counter | Callback context |
+|-------|-------------------|-----------------|
+| Frame capture | `framesFailedPreprocessing` | `'captureFrame'` |
+| Preprocessing | `framesFailedPreprocessing` | `'processFrame'` |
+| Recognition | `framesFailedRecognition` | `'recognizeAndSolve'` |
+
+Errors never crash the controller. The loop continues processing
+subsequent frames.
+
+### Files Added/Modified
+
+| File | Action | Description |
+|------|--------|-------------|
+| `src/inference/liveRecognitionController.ts` | **New** | Live recognition loop controller |
+| `src/__tests__/liveRecognitionController.test.ts` | **New** | 29 tests for controller lifecycle, processing, stability, errors |
+| `docs/mobile_inference_plan.md` | **Updated** | This document |
+
+### Next Step: Sprint 6 — UI Overlay Integration
+
+The next sprint will connect the `LiveRecognitionController` to a React
+Native camera view with:
+
+- Live camera frame capture via `expo-camera` or `react-native-camera`
+- Equation guide-box overlay (4:1 aspect ratio)
+- Real-time stable equation display
+- Solve result overlay with step-by-step explanation
+- Performance monitoring via diagnostics
+
 
