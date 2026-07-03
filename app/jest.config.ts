@@ -4,7 +4,7 @@ const config: Config = {
   preset: 'ts-jest',
   testEnvironment: 'node',
   roots: ['<rootDir>/src'],
-  testMatch: ['**/__tests__/**/*.test.ts'],
+  testMatch: ['**/__tests__/**/*.test.ts', '**/__tests__/**/*.test.tsx'],
   moduleNameMapper: {
     '^@parser/(.*)$': '<rootDir>/src/parser/$1',
     '^@solver/(.*)$': '<rootDir>/src/solver/$1',
@@ -13,9 +13,10 @@ const config: Config = {
     '^@diagnostics/(.*)$': '<rootDir>/src/diagnostics/$1',
     '^@pipeline/(.*)$': '<rootDir>/src/pipeline/$1',
     '^@inference/(.*)$': '<rootDir>/src/inference/$1',
+    '^@ui/(.*)$': '<rootDir>/src/ui/$1',
   },
   transform: {
-    '^.+\\.ts$': ['ts-jest', {
+    '^.+\\.tsx?$': ['ts-jest', {
       tsconfig: 'tsconfig.test.json',
     }],
   },

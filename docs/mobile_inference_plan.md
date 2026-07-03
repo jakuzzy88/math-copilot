@@ -445,7 +445,7 @@ npx react-native run-ios
 | 5D | Install `onnxruntime-react-native`, real inference implementation, mock tests | ✅ Complete |
 | 5E | Camera frame capture + crop + resize pipeline | ✅ Complete |
 | 5F | Live OCR loop with StabilityAggregator integration | ✅ Complete |
-| 6A | TFLite conversion evaluation | 🔜 Planned |
+| 6A | UI overlay integration | ✅ Complete |
 
 ---
 
@@ -725,15 +725,138 @@ subsequent frames.
 | `src/__tests__/liveRecognitionController.test.ts` | **New** | 29 tests for controller lifecycle, processing, stability, errors |
 | `docs/mobile_inference_plan.md` | **Updated** | This document |
 
-### Next Step: Sprint 6 — UI Overlay Integration
+### Next Step: Sprint 6B — Real Camera Integration
 
-The next sprint will connect the `LiveRecognitionController` to a React
-Native camera view with:
+The next sprint will connect the `LiveRecognitionController` to a real device
+camera via `expo-camera` or `react-native-camera`, replacing the
+`StaticFrameProvider` with live camera frames.
 
-- Live camera frame capture via `expo-camera` or `react-native-camera`
-- Equation guide-box overlay (4:1 aspect ratio)
-- Real-time stable equation display
-- Solve result overlay with step-by-step explanation
-- Performance monitoring via diagnostics
+---
 
+## 17. Sprint 6A: UI Overlay Integration
 
+### Overview
+
+Sprint 6A connects the live recognition architecture (Sprint 5F) to a
+UI-friendly state layer and composable overlay components. The overlay
+renders directly on top of a camera preview placeholder and includes:
+
+- Equation guide-box overlay
+- Recognized equation + solution display
+- First explanation step preview
+- Toggleable diagnostics/debug panel
+- Demo/static mode for testing without real camera or ONNX runtime
+
+### Architecture
+
+```
+┌──────────────────────────┐
+│ LiveRecognitionScreen    │  Screen controller
+│   ├── LiveRecognitionController (from Sprint 5F)
+│   ├── RecognitionUiState adapter
+│   └── State listeners
+└──────┬───────────────────┘
+       │ state updates
+       ▼
+┌──────────────────────────┐
+│ RecognitionOverlay       │  Composition component
+│   ├── GuideBoxOverlay    │  4:1 aspect ratio target box
+│   ├── SolutionCard       │  equation + solution + step
+│   └── DiagnosticsPanel   │  debug info (toggleable)
+└──────────────────────────┘
+```
+
+### UI State Mapping
+
+The `recognitionUiState.ts` module converts internal types into a flat,
+UI-friendly `RecognitionUiState` object:
+
+| Internal State | UI Mode | Status Message |
+|---------------|---------|---------------|
+| Controller not started | `idle` | "Point camera at a handwritten equation…" |
+| Frames processing, no result yet | `scanning` | "Scanning for equation…" |
+| Stable result, confidence ≥ 0.65 | `stable` | "Equation recognized: 3x+4=10" |
+| Stable result but low confidence | `uncertain` | "Low confidence (55.0%)" |
+| Processing error | `error` | "Error: ONNX session crashed" |
+
+### Guide Box Behavior
+
+The guide box is a bordered rectangle with a 4:1 aspect ratio (matching
+the model's 512×128 input), displayed at 85% container width by default.
+
+| Mode | Border Color | Opacity |
+|------|-------------|---------|
+| Active (scanning/uncertain) | `#00E676` (green) | 1.0 |
+| Inactive (stable/idle/error) | `rgba(255,255,255,0.4)` | 0.6 |
+
+### Solution Card
+
+The solution card appears below the guide box and adapts its background
+color based on the recognition mode and confidence level:
+
+| Condition | Background |
+|-----------|-----------|
+| Stable, confidence ≥ 0.85 | Green |
+| Stable, confidence < 0.85 | Blue |
+| Uncertain | Orange |
+| Error | Red |
+| Scanning/Idle | Dark |
+
+### Diagnostics Panel
+
+A toggleable debug panel showing:
+
+- Frames seen / processed / skipped / rejected
+- Preprocessing and recognition failure counts
+- Stable results emitted
+- Last raw OCR text and last stable equation
+- Average preprocessing, recognition, and total processing times
+
+### Demo/Static Mode
+
+A `DemoRecognizer` class returns predefined equation responses
+("3x+4=10" → "x=2") for UI testing without real camera or ONNX runtime:
+
+```typescript
+const screen = new LiveRecognitionScreen({ demoMode: true });
+screen.start();
+// UI transitions: idle → scanning → uncertain → stable
+```
+
+This allows full end-to-end UI testing in Jest with:
+- `StaticFrameProvider` (synthetic RGBA frames)
+- `DemoRecognizer` (fake recognition output)
+- `StabilityAggregator` (real aggregation logic)
+
+### Files Added/Modified
+
+| File | Action | Description |
+|------|--------|-------------|
+| `src/ui/recognitionUiState.ts` | **New** | UI state adapter with mode mapping and formatting |
+| `src/ui/components/GuideBoxOverlay.tsx` | **New** | Guide box overlay component |
+| `src/ui/components/SolutionCard.tsx` | **New** | Solution card overlay component |
+| `src/ui/components/DiagnosticsPanel.tsx` | **New** | Diagnostics panel component |
+| `src/ui/components/RecognitionOverlay.tsx` | **New** | Overlay composition component |
+| `src/ui/LiveRecognitionScreen.ts` | **New** | Screen controller with demo mode |
+| `src/__tests__/recognitionUiState.test.ts` | **New** | 28 tests for UI state mapping |
+| `src/__tests__/recognitionOverlay.test.ts` | **New** | 18 tests for overlay components |
+| `src/__tests__/liveRecognitionScreen.test.ts` | **New** | 16 tests for screen controller |
+| `jest.config.ts` | **Modified** | Added .tsx support and @ui/* path |
+| `tsconfig.json` | **Modified** | Added jsx and @ui/* path |
+| `docs/mobile_inference_plan.md` | **Updated** | This document |
+
+### What Is Still Missing Before Real Device Camera OCR
+
+1. **React Native App Shell** — No `App.tsx` / metro bundler is scaffolded yet.
+   The overlay components are written as data-driven descriptions, not JSX.
+2. **Real Camera Provider** — `expo-camera` or `react-native-camera`
+   integration to replace `StaticFrameProvider` with live frames.
+3. **ONNX Runtime on Device** — The `OnnxEquationRecognizer` needs a real
+   `.onnx` model loaded via `onnxruntime-react-native` on an Android/iOS device.
+4. **Frame Rate Tuning** — The 250 ms interval needs benchmarking on real
+   devices to find the optimal capture rate.
+5. **UI Rendering** — The serializable render data needs to be mapped to
+   actual React Native `<View>` / `<Text>` primitives.
+6. **Permissions** — Camera permissions (Android/iOS) are not handled yet.
+7. **Focus/Exposure Control** — Auto-focus and exposure compensation for
+   different lighting conditions.
