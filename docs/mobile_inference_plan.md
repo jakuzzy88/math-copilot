@@ -1230,3 +1230,95 @@ When the app loads in demo mode:
 | Camera permission flow | Test the permission request on device |
 | Frame rate benchmarking | Measure capture interval on real hardware |
 | Guide box positioning | Verify 4:1 overlay aligns with camera frame |
+
+---
+
+## 20. Sprint 7A-FIX: Offline Release APK Build Workflow
+
+### Problem
+
+The Sprint 7A debug APK requires a running Metro bundler on the
+development machine. When Metro is unavailable, the app shows
+"Unable to load script..." and cannot render the UI.
+
+### Solution
+
+Build a release APK that embeds the JavaScript bundle directly in the
+APK file. The app runs completely offline — no Metro, no USB, no
+network connection required.
+
+### How to Build the Offline Demo APK
+
+```bash
+cd math-copilot/app
+
+# One-command build (bundles JS + builds release APK):
+npm run build:release-apk
+
+# Or step by step:
+npm run bundle:android       # Creates index.android.bundle in assets/
+npm run assemble:release     # Builds release APK with embedded bundle
+```
+
+### APK Output Location
+
+```
+app/android/app/build/outputs/apk/release/app-release.apk
+```
+
+### How to Install on Phone
+
+```bash
+# Install (replace existing app):
+adb install -r android/app/build/outputs/apk/release/app-release.apk
+
+# Launch:
+adb shell am start -n com.mathcopilot/.MainActivity
+
+# Or: tap the MathCopilot icon on the phone's app launcher.
+```
+
+### Build Verification
+
+| Step | Result |
+|------|--------|
+| `npm run bundle:android` | ✅ 779 modules bundled |
+| `npm run assemble:release` | ✅ BUILD SUCCESSFUL (1m 33s) |
+| Release APK size | 50 MB (vs 112 MB debug) |
+| `adb install` | ✅ Success |
+| App launches without Metro | ✅ Verified |
+| No "Unable to load script" | ✅ Confirmed |
+
+### Signing Warning
+
+> **⚠️ The release APK uses the debug keystore for local testing only.**
+>
+> The `android/app/build.gradle` release build type is configured with
+> `signingConfig signingConfigs.debug`. This is acceptable for
+> side-loading during development but **must be replaced** with a proper
+> release keystore before publishing to the Play Store.
+>
+> See: https://reactnative.dev/docs/signed-apk-android
+
+### Scripts Added
+
+| Script | Command |
+|--------|---------|
+| `bundle:android` | `react-native bundle --platform android --dev false ...` |
+| `assemble:release` | `cd android && ./gradlew assembleRelease` |
+| `build:release-apk` | `npm run bundle:android && npm run assemble:release` |
+
+### Files Modified
+
+| File | Change |
+|------|--------|
+| `package.json` | Added `bundle:android`, `assemble:release`, `build:release-apk` scripts |
+| `android/app/build.gradle` | Updated release signing comment |
+| `.gitignore` | Added JS bundle and generated res patterns |
+| `docs/mobile_inference_plan.md` | This section |
+
+### Demo Limitations (unchanged)
+
+- `DEMO_MODE = true` — fake recognizer, placeholder camera
+- No real OCR, no ONNX inference, no camera frames
+- Native modules (`onnxruntime-react-native`, `react-native-vision-camera`) disabled

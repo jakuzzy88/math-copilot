@@ -27,6 +27,12 @@ app/android/app/release/
 *.aab
 local.properties
 
+# Generated JS bundle and assets (created by 'react-native bundle')
+app/android/app/src/main/assets/index.android.bundle
+app/android/app/src/main/assets/index.android.bundle.map
+app/android/app/src/main/res/drawable-*
+app/android/app/src/main/res/raw/
+
 # Training generated data and model artifacts
 training/datasets/
 training/runs/

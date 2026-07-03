@@ -8,6 +8,9 @@
     "start": "react-native start",
     "android": "react-native run-android",
     "ios": "react-native run-ios",
+    "bundle:android": "react-native bundle --platform android --dev false --entry-file index.js --bundle-output android/app/src/main/assets/index.android.bundle --assets-dest android/app/src/main/res",
+    "assemble:release": "cd android && ./gradlew assembleRelease",
+    "build:release-apk": "npm run bundle:android && npm run assemble:release",
     "test": "jest --verbose",
     "test:watch": "jest --watch",
     "typecheck": "tsc --noEmit"
