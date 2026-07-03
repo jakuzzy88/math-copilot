@@ -446,6 +446,7 @@ npx react-native run-ios
 | 5E | Camera frame capture + crop + resize pipeline | ✅ Complete |
 | 5F | Live OCR loop with StabilityAggregator integration | ✅ Complete |
 | 6A | UI overlay integration | ✅ Complete |
+| 6B | React Native camera shell + demo overlay | ✅ Complete |
 
 ---
 
@@ -855,8 +856,217 @@ This allows full end-to-end UI testing in Jest with:
    `.onnx` model loaded via `onnxruntime-react-native` on an Android/iOS device.
 4. **Frame Rate Tuning** — The 250 ms interval needs benchmarking on real
    devices to find the optimal capture rate.
-5. **UI Rendering** — The serializable render data needs to be mapped to
-   actual React Native `<View>` / `<Text>` primitives.
-6. **Permissions** — Camera permissions (Android/iOS) are not handled yet.
+5. ~~**UI Rendering** — The serializable render data needs to be mapped to
+   actual React Native `<View>` / `<Text>` primitives.~~ ✅ Done in Sprint 6B.
+6. ~~**Permissions** — Camera permissions (Android/iOS) are not handled yet.~~ ✅ Done in Sprint 6B.
 7. **Focus/Exposure Control** — Auto-focus and exposure compensation for
    different lighting conditions.
+
+---
+
+## 18. Sprint 6B: React Native Camera Shell
+
+### Overview
+
+Sprint 6B converts the app from a TypeScript-only test package into a
+phone-testable React Native application shell. The screen renders actual
+React Native components (`View`, `Text`, `Pressable`, `StyleSheet`) and
+handles camera permission flow, guide box overlay, equation/solution
+display, and a toggleable diagnostics panel.
+
+### Key Decisions
+
+- **React Native CLI (bare)** — The project uses bare React Native, not
+  Expo, to maintain compatibility with `onnxruntime-react-native` and
+  `react-native-vision-camera` native modules.
+- **Demo mode first** — `DEMO_MODE = true` allows full UI testing on a
+  phone without requiring ONNX Runtime or live camera frames.
+- **Conditional camera import** — `react-native-vision-camera` is
+  imported via `try/catch` so that Jest tests run without native modules.
+
+### Architecture
+
+```
+┌──────────────────────────┐
+│ App.tsx                  │  Root entry
+│   └── MathCameraScreen   │  Single-screen app
+└──────┬───────────────────┘
+       │
+       ▼
+┌──────────────────────────┐
+│ MathCameraScreen.tsx     │  Real React Native component
+│   ├── Camera permission  │  useSafeCameraPermission()
+│   ├── Camera preview     │  VisionCamera or placeholder
+│   ├── Guide box overlay  │  4:1 aspect ratio, green when active
+│   ├── Status text        │  Mode-specific message
+│   ├── Solution card      │  Equation + solution + step
+│   ├── Diagnostics toggle │  Pressable toggle
+│   └── Diagnostics panel  │  Debug rows from controller
+└──────┬───────────────────┘
+       │ uses
+       ▼
+┌──────────────────────────┐
+│ LiveRecognitionScreen    │  Sprint 6A screen controller
+│   └── DemoRecognizer     │  Fake OCR for demo mode
+└──────────────────────────┘
+```
+
+### Demo Mode Behavior
+
+When `DEMO_MODE = true`:
+
+1. Camera permission is auto-granted (no system prompt).
+2. A dark placeholder replaces the camera preview, with "📸 Camera
+   preview (demo mode)" text and an orange "DEMO MODE" badge.
+3. The LiveRecognitionScreen controller uses `DemoRecognizer` which
+   emits the equation `3x+4=10` with varying confidence scores.
+4. After ~3 frames, the `StabilityAggregator` reaches stability and the
+   solution card shows:
+   - Equation: `3x+4=10`
+   - Solution: `→ x=2`
+   - Confidence: `~90.0% · HIGH`
+   - First explanation step
+5. Mode indicator dot transitions: gray (idle) → blue (scanning) →
+   green (stable).
+6. Diagnostics panel shows frame counts, average timing, and stability
+   metrics.
+
+### What the User Sees on Phone
+
+| Area | Content |
+|------|---------|
+| Top-left | Mode indicator (dot + "STABLE") |
+| Top-right | "DEMO MODE" orange badge |
+| Center | 4:1 guide box with green border |
+| Below guide box | Status message |
+| Below camera | Solution card (green background) |
+| Bottom | "▶ Show Diagnostics" toggle |
+
+### Camera Permission Flow
+
+| State | Screen |
+|-------|--------|
+| Checking | Loading spinner + "Checking camera permission…" |
+| Denied | Title "📷 Camera Access Required" + explanation + "Grant Camera Access" button |
+| Granted | Full camera screen with guide box |
+
+### Android Phone Testing Instructions
+
+#### Prerequisites
+
+1. Node.js 18+ installed.
+2. Android SDK installed (Android Studio recommended).
+3. `ANDROID_HOME` environment variable set.
+4. USB debugging enabled on the Android device.
+5. Device connected via USB or wireless ADB.
+
+#### Setup (first time only)
+
+```bash
+# 1. Navigate to the app directory.
+cd math-copilot/app
+
+# 2. Install JavaScript dependencies.
+npm install
+
+# 3. Generate the Android project (if android/ directory is missing).
+#    NOTE: The android/ directory must be generated using react-native
+#    init or manually. See "Generating Android Project" below.
+
+# 4. Add camera permission to AndroidManifest.xml.
+#    Add the following lines inside <manifest>:
+#      <uses-permission android:name="android.permission.CAMERA" />
+#    And inside <application>:
+#      <meta-data android:name="com.google.android.gms.vision.DEPENDENCIES"
+#                 android:value="barcode" />
+```
+
+#### Generating Android Project
+
+If the `android/` directory does not exist yet:
+
+```bash
+# Option A: Use @react-native-community/cli to generate native projects.
+npx -y @react-native-community/cli init MathCopilot --directory ./temp-rn
+# Copy android/ from temp-rn into app/android/.
+# Update android/app/build.gradle with the correct app name.
+
+# Option B: Manual setup (advanced).
+# Create android/ directory structure manually following RN docs.
+```
+
+#### Running
+
+```bash
+# 1. Start Metro bundler.
+cd math-copilot/app
+npm start
+
+# 2. In a separate terminal, build and install on device.
+npm run android
+
+# 3. The app should launch showing the demo UI.
+```
+
+#### Expected Demo UI Behavior
+
+1. App launches with a dark camera placeholder.
+2. Orange "DEMO MODE" badge appears top-right.
+3. Mode indicator shows "SCANNING" (blue dot).
+4. After ~1 second, transitions to "STABLE" (green dot).
+5. Solution card turns green, showing:
+   - `3x+4=10`
+   - `→ x=2`
+   - `Confidence: 90.0% · HIGH`
+6. Tapping "▶ Show Diagnostics" reveals frame processing stats.
+
+#### How to Know It Works
+
+- [x] App installs and launches without crash.
+- [x] Demo mode badge is visible.
+- [x] Guide box renders with 4:1 aspect ratio.
+- [x] Equation and solution appear in the solution card.
+- [x] Diagnostics panel toggles on/off.
+- [x] Mode indicator transitions from idle → scanning → stable.
+
+### Known Limitations
+
+1. **No android/ directory generated** — The bare React Native android
+   project must be scaffolded separately (Sprint 7 or manual).
+2. **Camera preview is a placeholder** — Real camera preview requires
+   completing the Android project setup and linking vision-camera.
+3. **No real OCR** — `DEMO_MODE = true` uses a fake recognizer. Setting
+   `DEMO_MODE = false` requires the ONNX model and native frame extraction.
+4. **Frame extraction is stubbed** — `VisionCameraFrameProvider.updateFrame()`
+   throws "not yet implemented". A native Frame Processor plugin is needed.
+5. **No iOS support** — iOS requires Xcode project setup and CocoaPods.
+
+### Integration Path to Real OCR
+
+| Step | Sprint | Status |
+|------|--------|--------|
+| React Native shell + demo UI | 6B | ✅ Complete |
+| Generate `android/` project | 7 | TODO |
+| Link `react-native-vision-camera` | 7 | TODO |
+| Implement `VisionCameraFrameProvider` | 7 | TODO |
+| Test camera preview on device | 7 | TODO |
+| Load ONNX model on device | 7+ | TODO |
+| Wire real `OnnxEquationRecognizer` | 7+ | TODO |
+| End-to-end live OCR on device | 7+ | TODO |
+
+### Files Added/Modified
+
+| File | Action | Description |
+|------|--------|-------------|
+| `src/screens/MathCameraScreen.tsx` | **New** | Main camera screen with real RN components |
+| `src/screens/realModeStubs.ts` | **New** | VisionCameraFrameProvider stub + TODO docs |
+| `src/App.tsx` | **New** | Root app component |
+| `index.js` | **New** | React Native entry point |
+| `metro.config.js` | **New** | Metro bundler config (.onnx asset support) |
+| `babel.config.js` | **New** | Babel config with RN preset |
+| `src/__tests__/mathCameraScreen.test.ts` | **New** | 24 tests for screen adapter logic |
+| `package.json` | **Modified** | Added react, react-native, vision-camera deps + scripts |
+| `tsconfig.json` | **Modified** | Added @screens/* path alias |
+| `jest.config.ts` | **Modified** | Added @screens/* module mapping |
+| `docs/mobile_inference_plan.md` | **Updated** | This document |
+
