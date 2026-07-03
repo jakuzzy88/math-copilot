@@ -1,15 +1,17 @@
 /**
  * MathCameraScreen — Main camera screen for the Math Copilot.
  *
- * Sprint 6B: React Native Camera Shell.
+ * Sprint 7: Real Camera Preview.
  *
  * Behaviour:
- *   1. Request camera permission on mount.
+ *   1. Request camera permission on mount (unless in demo mode).
  *   2. If permission is denied: show permission explanation.
- *   3. If permission is granted: show camera preview (or placeholder in demo).
+ *   3. If permission is granted: show real camera preview via VisionCamera.
  *   4. Overlay the 4:1 equation guide box.
  *   5. Run demo/static recognition mode.
  *   6. Display recognized equation, solution, explanation step, and diagnostics.
+ *   7. Handle camera lifecycle (mount, unmount, pause, resume via AppState).
+ *   8. If VisionCamera is unavailable, fall back gracefully with a clear message.
  *
  * The screen wraps the existing LiveRecognitionScreen controller
  * (from Sprint 6A) and renders real React Native components from
@@ -41,21 +43,32 @@ import {
   getConfidenceLevel,
 } from '../ui/components/SolutionCard';
 
+import { CameraPreview } from './CameraPreview';
+import { useCameraLifecycle } from './useCameraLifecycle';
+
 // ---------------------------------------------------------------------------
-// Camera import (conditional — not available in Jest)
+// Camera permission import (conditional — not available in Jest)
 // ---------------------------------------------------------------------------
 
-let Camera: typeof import('react-native-vision-camera').Camera | undefined;
 let useCameraPermission: typeof import('react-native-vision-camera').useCameraPermission | undefined;
-let useCameraDevice: typeof import('react-native-vision-camera').useCameraDevice | undefined;
 
 try {
   const visionCamera = require('react-native-vision-camera');
-  Camera = visionCamera.Camera;
   useCameraPermission = visionCamera.useCameraPermission;
-  useCameraDevice = visionCamera.useCameraDevice;
 } catch {
   // Not available in Node/Jest — camera features disabled.
+}
+
+// ---------------------------------------------------------------------------
+// Android PermissionsAndroid fallback (conditional — not available in Jest)
+// ---------------------------------------------------------------------------
+
+let PermissionsAndroid: typeof import('react-native').PermissionsAndroid | undefined;
+
+try {
+  PermissionsAndroid = require('react-native').PermissionsAndroid;
+} catch {
+  // Not available in Node/Jest.
 }
 
 // ---------------------------------------------------------------------------
@@ -63,24 +76,24 @@ try {
 // ---------------------------------------------------------------------------
 
 /** Global demo mode toggle. Set to false for real camera + OCR. */
-export const DEMO_MODE = true;
+export const DEMO_MODE = false;
 
 // ---------------------------------------------------------------------------
-// Camera permission hook (safe for Jest)
+// Camera permission hook (safe for Jest / non-native environments)
 // ---------------------------------------------------------------------------
 
-interface CameraPermissionState {
+export interface CameraPermissionState {
   hasPermission: boolean;
   requestPermission: () => Promise<void>;
   isLoading: boolean;
 }
 
-function useSafeCameraPermission(): CameraPermissionState {
+export function useSafeCameraPermission(isDemoMode: boolean): CameraPermissionState {
   const [hasPermission, setHasPermission] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Use real hook if available.
-  if (useCameraPermission) {
+  // Use real VisionCamera hook if available and not in demo mode.
+  if (useCameraPermission && !isDemoMode) {
     // eslint-disable-next-line react-hooks/rules-of-hooks
     const perm = useCameraPermission();
     return {
@@ -90,18 +103,58 @@ function useSafeCameraPermission(): CameraPermissionState {
     };
   }
 
-  // Fallback for non-native environments.
+  // Fallback: use PermissionsAndroid or auto-grant for demo mode.
   const requestPermission = useCallback(async () => {
-    setIsLoading(false);
-    setHasPermission(DEMO_MODE); // Auto-grant in demo mode.
-  }, []);
-
-  useEffect(() => {
-    if (DEMO_MODE) {
+    if (isDemoMode) {
       setHasPermission(true);
       setIsLoading(false);
+      return;
     }
-  }, []);
+
+    // Try Android native permission API.
+    if (PermissionsAndroid) {
+      try {
+        const result = await PermissionsAndroid.request(
+          PermissionsAndroid.PERMISSIONS.CAMERA,
+          {
+            title: 'Camera Permission',
+            message: 'Math Copilot needs camera access to scan handwritten equations.',
+            buttonPositive: 'Grant',
+            buttonNegative: 'Deny',
+          },
+        );
+        setHasPermission(result === PermissionsAndroid.RESULTS.GRANTED);
+      } catch {
+        setHasPermission(false);
+      }
+    }
+    setIsLoading(false);
+  }, [isDemoMode]);
+
+  // On mount: check current permission status or auto-grant for demo.
+  useEffect(() => {
+    if (isDemoMode) {
+      setHasPermission(true);
+      setIsLoading(false);
+      return;
+    }
+
+    // Check existing permission via Android API.
+    if (PermissionsAndroid) {
+      PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.CAMERA)
+        .then((granted) => {
+          setHasPermission(granted);
+          setIsLoading(false);
+        })
+        .catch(() => {
+          setHasPermission(false);
+          setIsLoading(false);
+        });
+    } else {
+      // No permission API available (e.g. Jest) — stop loading, show denied.
+      setIsLoading(false);
+    }
+  }, [isDemoMode]);
 
   return { hasPermission, requestPermission, isLoading };
 }
@@ -117,10 +170,11 @@ export function MathCameraScreen(): React.JSX.Element {
   const [diagnosticsExpanded, setDiagnosticsExpanded] = useState(false);
 
   // --- Camera permission ---
-  const { hasPermission, requestPermission, isLoading } = useSafeCameraPermission();
+  const { hasPermission, requestPermission, isLoading } = useSafeCameraPermission(DEMO_MODE);
 
-  // --- Camera device (safe) ---
-  const device = useCameraDevice ? useCameraDevice('back') : undefined;
+  // --- Camera lifecycle ---
+  const cameraEnabled = !DEMO_MODE && hasPermission;
+  const { isActive: isCameraActive } = useCameraLifecycle(cameraEnabled);
 
   // --- Controller lifecycle ---
   useEffect(() => {
@@ -227,9 +281,12 @@ export function MathCameraScreen(): React.JSX.Element {
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="#000" />
 
-      {/* Camera preview or placeholder */}
+      {/* Camera preview (real or placeholder) */}
       <View style={styles.cameraContainer}>
-        {renderCameraPreview(device)}
+        <CameraPreview
+          isActive={isCameraActive}
+          isDemoMode={DEMO_MODE}
+        />
 
         {/* Demo mode badge */}
         {DEMO_MODE && (
@@ -356,38 +413,6 @@ export function MathCameraScreen(): React.JSX.Element {
 }
 
 // ---------------------------------------------------------------------------
-// Camera preview helper
-// ---------------------------------------------------------------------------
-
-function renderCameraPreview(
-  device: ReturnType<NonNullable<typeof useCameraDevice>> | undefined,
-): React.JSX.Element {
-  // Real camera available.
-  if (Camera && device && !DEMO_MODE) {
-    const CameraComponent = Camera;
-    return (
-      <CameraComponent
-        style={StyleSheet.absoluteFill}
-        device={device}
-        isActive={true}
-      />
-    );
-  }
-
-  // Placeholder (demo mode or no camera).
-  return (
-    <View style={styles.cameraPlaceholder}>
-      <Text style={styles.cameraPlaceholderIcon}>📸</Text>
-      <Text style={styles.cameraPlaceholderText}>
-        {DEMO_MODE
-          ? 'Camera preview (demo mode)'
-          : 'Camera not available'}
-      </Text>
-    </View>
-  );
-}
-
-// ---------------------------------------------------------------------------
 // Mode color helper
 // ---------------------------------------------------------------------------
 
@@ -457,21 +482,6 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     borderBottomLeftRadius: 24,
     borderBottomRightRadius: 24,
-  },
-  cameraPlaceholder: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: '#1A1A2E',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  cameraPlaceholderIcon: {
-    fontSize: 48,
-    marginBottom: 12,
-  },
-  cameraPlaceholderText: {
-    fontSize: 14,
-    color: '#666',
-    fontStyle: 'italic',
   },
 
   // --- Demo badge ---
