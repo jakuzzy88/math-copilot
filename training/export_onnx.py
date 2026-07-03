@@ -6,7 +6,12 @@ Sprint C: Export Readiness (prepared but not executed on real checkpoints).
 This module provides:
   1. Model shape inspection (input/output shapes, parameter count)
   2. ONNX export function with dynamic axes for batch and width
-  3. Export validation via onnxruntime (if available)
+  3. Comprehensive export validation:
+     - File existence and minimum size check (>= 1 MB)
+     - onnx.checker.check_model
+     - onnxruntime inference test
+     - Output shape matching between PyTorch and ONNX
+     - Numerical equivalence (max abs diff < 1e-4)
   4. Smoke test with dummy tensors
 
 Usage (inspect only):
@@ -38,6 +43,21 @@ if str(_PROJECT_ROOT) not in sys.path:
 
 from training.models.vocabulary import VOCAB_SIZE
 from training.models.cnn_ctc import build_model, CNNCTC
+
+
+# ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
+
+# Minimum acceptable ONNX file size for our ~1.4M param model.
+# float32 weights alone are ~5.5 MB; anything under 1 MB is suspicious.
+MIN_ONNX_FILE_SIZE_BYTES = 1 * 1024 * 1024  # 1 MB
+
+# Maximum acceptable numerical difference between PyTorch and ONNX outputs.
+MAX_NUMERICAL_DIFF = 1e-4
+
+# Default ONNX opset version.  Using 17 for broad compatibility.
+DEFAULT_OPSET_VERSION = 17
 
 
 # ---------------------------------------------------------------------------
@@ -117,12 +137,16 @@ def export_to_onnx(
     output_path: str | Path,
     img_height: int = 128,
     img_width: int = 512,
-    opset_version: int = 17,
+    opset_version: int = DEFAULT_OPSET_VERSION,
 ) -> Path:
     """Export a CNN-CTC model to ONNX format.
 
     Uses dynamic axes for batch size and input width to allow
     variable-length equation images at inference time.
+
+    Key: Forces ``dynamo=False`` and ``external_data=False`` for
+    PyTorch 2.12+ compatibility, ensuring all weights are embedded
+    in a single .onnx file rather than split into .onnx + .onnx.data.
 
     Args:
         model: Trained CNNCTC model instance.
@@ -133,6 +157,9 @@ def export_to_onnx(
 
     Returns:
         The resolved output path.
+
+    Raises:
+        RuntimeError: If the exported file is missing or suspiciously small.
     """
     model.eval()
     output_path = Path(output_path)
@@ -140,6 +167,9 @@ def export_to_onnx(
 
     dummy_input = torch.randn(1, 1, img_height, img_width)
 
+    # Use the legacy (TorchScript-based) export path for stability.
+    # PyTorch 2.12+ defaults to dynamo=True which may produce
+    # external data files.  We force both flags explicitly.
     torch.onnx.export(
         model,
         dummy_input,
@@ -153,54 +183,170 @@ def export_to_onnx(
             "image": {0: "batch_size", 3: "width"},
             "log_probs": {0: "time_steps", 1: "batch_size"},
         },
+        dynamo=False,
+        external_data=False,
     )
 
+    # --- Immediate sanity checks ---
+    if not output_path.exists():
+        raise RuntimeError(f"ONNX export failed: {output_path} was not created")
+
+    file_size = output_path.stat().st_size
     print(f"ONNX model exported to {output_path}")
-    print(f"  File size: {output_path.stat().st_size / 1024:.1f} KB")
+    print(f"  File size: {file_size / 1024 / 1024:.2f} MB ({file_size:,} bytes)")
+
+    if file_size < MIN_ONNX_FILE_SIZE_BYTES:
+        raise RuntimeError(
+            f"ONNX export produced a suspiciously small file: "
+            f"{file_size:,} bytes (< {MIN_ONNX_FILE_SIZE_BYTES:,} byte minimum).  "
+            f"This likely means weights were not embedded.  "
+            f"Check for a stray .onnx.data file."
+        )
+
     return output_path
 
 
 # ---------------------------------------------------------------------------
-# ONNX validation (optional, requires onnxruntime)
+# ONNX validation
 # ---------------------------------------------------------------------------
 
 def validate_onnx(
     onnx_path: str | Path,
+    model: nn.Module | None = None,
     img_height: int = 128,
     img_width: int = 512,
 ) -> bool:
-    """Validate an ONNX model by running inference with onnxruntime.
+    """Validate an exported ONNX model comprehensively.
 
-    Returns True if validation passes.
+    Checks:
+      1. File exists and meets minimum size threshold.
+      2. onnx.checker.check_model passes.
+      3. onnxruntime can load the model and run inference.
+      4. ONNX output shape matches PyTorch output shape.
+      5. Numerical difference between PyTorch and ONNX outputs is small.
+
+    If ``onnx`` or ``onnxruntime`` are not installed, prints a clear
+    error message and returns False (validation failure, not silent skip).
+
+    Args:
+        onnx_path: Path to the exported .onnx file.
+        model: Optional PyTorch model for numerical comparison.
+               If None, only structural validation is performed.
+        img_height: Image height used during export.
+        img_width: Image width used during export.
+
+    Returns:
+        True if all validation checks pass.
+
+    Raises:
+        ImportError: Printed as clear message; returns False.
+        AssertionError: On shape or numerical mismatch.
     """
-    try:
-        import onnx
-        import onnxruntime as ort
-    except ImportError:
-        print("  [SKIP] onnx / onnxruntime not installed. Install with:")
-        print("         pip install onnx onnxruntime")
-        return False
-
     onnx_path = Path(onnx_path)
 
-    # Check model structure.
-    onnx_model = onnx.load(str(onnx_path))
-    onnx.checker.check_model(onnx_model)
-    print("  ONNX model structure: valid")
+    # -- Step 0: Check file existence and size --
+    if not onnx_path.exists():
+        print(f"  [FAIL] ONNX file does not exist: {onnx_path}")
+        return False
 
-    # Run inference.
-    session = ort.InferenceSession(str(onnx_path))
+    file_size = onnx_path.stat().st_size
+    if file_size < MIN_ONNX_FILE_SIZE_BYTES:
+        print(
+            f"  [FAIL] ONNX file is suspiciously small: "
+            f"{file_size:,} bytes (minimum: {MIN_ONNX_FILE_SIZE_BYTES:,})"
+        )
+        return False
+    print(f"  [PASS] File size: {file_size / 1024 / 1024:.2f} MB")
+
+    # -- Step 1: Check onnx package availability --
+    try:
+        import onnx
+    except ImportError:
+        print("  [FAIL] 'onnx' package is not installed.")
+        print("         Install with: pip install onnx")
+        print("         Validation CANNOT proceed without this package.")
+        return False
+
+    # -- Step 2: onnx.checker.check_model --
+    try:
+        onnx_model = onnx.load(str(onnx_path))
+        onnx.checker.check_model(onnx_model)
+        print("  [PASS] onnx.checker.check_model")
+    except Exception as e:
+        print(f"  [FAIL] onnx.checker.check_model: {e}")
+        return False
+
+    # -- Step 3: Check onnxruntime availability --
+    try:
+        import onnxruntime as ort
+    except ImportError:
+        print("  [FAIL] 'onnxruntime' package is not installed.")
+        print("         Install with: pip install onnxruntime")
+        print("         Validation CANNOT proceed without this package.")
+        return False
+
+    # -- Step 4: Load model and run inference via onnxruntime --
     import numpy as np
-    dummy_input = np.random.randn(1, 1, img_height, img_width).astype(np.float32)
-    outputs = session.run(None, {"image": dummy_input})
 
-    output_shape = outputs[0].shape
+    try:
+        session = ort.InferenceSession(str(onnx_path))
+    except Exception as e:
+        print(f"  [FAIL] onnxruntime could not load model: {e}")
+        return False
+    print("  [PASS] onnxruntime loaded model")
+
+    # Use a fixed seed for deterministic dummy input.
+    rng = np.random.RandomState(42)
+    dummy_input_np = rng.randn(1, 1, img_height, img_width).astype(np.float32)
+
+    try:
+        ort_outputs = session.run(None, {"image": dummy_input_np})
+    except Exception as e:
+        print(f"  [FAIL] onnxruntime inference failed: {e}")
+        return False
+
+    onnx_output = ort_outputs[0]
     expected_t = img_width // 16
-    assert output_shape[0] == expected_t, f"Time steps mismatch: {output_shape[0]} != {expected_t}"
-    assert output_shape[1] == 1, f"Batch size mismatch: {output_shape[1]} != 1"
-    assert output_shape[2] == VOCAB_SIZE, f"Vocab size mismatch: {output_shape[2]} != {VOCAB_SIZE}"
+    expected_shape = (expected_t, 1, VOCAB_SIZE)
 
-    print(f"  ONNX inference: OK (output shape {output_shape})")
+    if onnx_output.shape != expected_shape:
+        print(
+            f"  [FAIL] ONNX output shape mismatch: "
+            f"{onnx_output.shape} != expected {expected_shape}"
+        )
+        return False
+    print(f"  [PASS] ONNX output shape: {onnx_output.shape}")
+
+    # -- Step 5: Numerical comparison with PyTorch (if model provided) --
+    if model is not None:
+        model.eval()
+        dummy_input_pt = torch.from_numpy(dummy_input_np)
+        with torch.no_grad():
+            pt_output = model(dummy_input_pt).numpy()
+
+        if pt_output.shape != onnx_output.shape:
+            print(
+                f"  [FAIL] Shape mismatch: PyTorch {pt_output.shape} "
+                f"vs ONNX {onnx_output.shape}"
+            )
+            return False
+        print(f"  [PASS] PyTorch output shape matches ONNX: {pt_output.shape}")
+
+        max_diff = float(np.max(np.abs(pt_output - onnx_output)))
+        mean_diff = float(np.mean(np.abs(pt_output - onnx_output)))
+        print(f"  [INFO] Numerical diff: max={max_diff:.6e}, mean={mean_diff:.6e}")
+
+        if max_diff > MAX_NUMERICAL_DIFF:
+            print(
+                f"  [FAIL] Numerical difference too large: "
+                f"max_diff={max_diff:.6e} > threshold={MAX_NUMERICAL_DIFF:.1e}"
+            )
+            return False
+        print(f"  [PASS] Numerical equivalence (max diff < {MAX_NUMERICAL_DIFF:.1e})")
+    else:
+        print("  [SKIP] Numerical comparison (no PyTorch model provided)")
+
+    print("  [PASS] All validation checks passed")
     return True
 
 
@@ -239,7 +385,8 @@ def run_smoke_test() -> bool:
         onnx_path = Path(tmpdir) / "test_model.onnx"
         try:
             export_to_onnx(model, onnx_path, img_height=img_h, img_width=img_w)
-            print(f"  [3/5] ONNX export OK: {onnx_path.stat().st_size / 1024:.1f} KB")
+            file_size = onnx_path.stat().st_size
+            print(f"  [3/5] ONNX export OK: {file_size / 1024 / 1024:.2f} MB")
         except Exception as e:
             print(f"  [3/5] ONNX export FAILED: {e}")
             print("  [NOTE] torch.onnx.export may require 'onnx' package.")
@@ -248,10 +395,23 @@ def run_smoke_test() -> bool:
             print("=" * 60)
             return False
 
-        # 4. Validate with onnxruntime (if available).
-        validated = validate_onnx(onnx_path, img_height=img_h, img_width=img_w)
-        status = "OK" if validated else "SKIPPED (onnxruntime not installed)"
+        # Verify no stray external data file was created.
+        data_file = Path(str(onnx_path) + ".data")
+        if data_file.exists():
+            print(f"  [WARN] Stray external data file found: {data_file}")
+            print("         Weights may not be embedded in the .onnx file!")
+
+        # 4. Full validation including numerical comparison.
+        validated = validate_onnx(
+            onnx_path, model=model, img_height=img_h, img_width=img_w,
+        )
+        status = "OK" if validated else "FAILED"
         print(f"  [4/5] ONNX validation: {status}")
+
+        if not validated:
+            print("\n  SMOKE TEST: FAILED")
+            print("=" * 60)
+            return False
 
     # 5. Test with different batch sizes (shape flexibility).
     for batch_size in [1, 4, 8]:
@@ -282,8 +442,8 @@ def main() -> None:
                         help="Path to trained checkpoint (.pt) for export.")
     parser.add_argument("--out", type=str, default=None,
                         help="Output path for the ONNX file.")
-    parser.add_argument("--opset", type=int, default=17,
-                        help="ONNX opset version (default: 17).")
+    parser.add_argument("--opset", type=int, default=DEFAULT_OPSET_VERSION,
+                        help=f"ONNX opset version (default: {DEFAULT_OPSET_VERSION}).")
     parser.add_argument("--height", type=int, default=128,
                         help="Image height (default: 128).")
     parser.add_argument("--width", type=int, default=512,
@@ -311,13 +471,34 @@ def main() -> None:
 
         model = build_model(img_height=img_h, img_width=img_w, num_classes=VOCAB_SIZE)
         model.load_state_dict(ckpt["model_state_dict"])
+        model.eval()
         print(f"Loaded checkpoint from epoch {ckpt.get('epoch', '?')}")
 
         info = inspect_model_shapes(img_height=img_h, img_width=img_w)
         print_model_inspection(info)
 
-        export_to_onnx(model, args.out, img_height=img_h, img_width=img_w, opset_version=args.opset)
-        validate_onnx(args.out, img_height=img_h, img_width=img_w)
+        # Remove any stale external data file from prior bad exports.
+        stale_data = Path(args.out + ".data")
+        if stale_data.exists():
+            stale_data.unlink()
+            print(f"  Removed stale external data file: {stale_data}")
+
+        export_to_onnx(
+            model, args.out,
+            img_height=img_h, img_width=img_w,
+            opset_version=args.opset,
+        )
+
+        print("\n--- Validating exported ONNX model ---")
+        valid = validate_onnx(
+            args.out, model=model,
+            img_height=img_h, img_width=img_w,
+        )
+        if not valid:
+            print("\n[ERROR] ONNX validation FAILED. The exported model is unreliable.")
+            sys.exit(1)
+
+        print("\n[OK] ONNX export and validation completed successfully.")
         return
 
     parser.print_help()

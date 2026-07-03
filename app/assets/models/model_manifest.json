@@ -1,0 +1,19 @@
+{
+  "modelId": "equation_recognizer",
+  "version": "1.0.0",
+  "exportDate": "2026-07-03",
+  "trainingRun": "synthetic_v2_full_50ep",
+  "exactAccuracy": 0.914,
+  "charAccuracy": 0.9796,
+  "inputTensorName": "image",
+  "inputShape": [1, 1, 128, 512],
+  "inputDtype": "float32",
+  "outputTensorName": "log_probs",
+  "outputShape": [32, 1, 19],
+  "outputDtype": "float32",
+  "opsetVersion": 17,
+  "vocabSize": 19,
+  "vocabulary": ["<blank>", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "x", "+", "-", "=", "/", "(", ")", " "],
+  "modelFile": "equation_recognizer_v1.onnx",
+  "notes": "CNN-CTC model trained on synthetic handwritten linear equations. Dark text on light background."
+}

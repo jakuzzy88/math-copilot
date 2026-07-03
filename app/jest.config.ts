@@ -12,6 +12,7 @@ const config: Config = {
     '^@grammar/(.*)$': '<rootDir>/src/grammar/$1',
     '^@diagnostics/(.*)$': '<rootDir>/src/diagnostics/$1',
     '^@pipeline/(.*)$': '<rootDir>/src/pipeline/$1',
+    '^@inference/(.*)$': '<rootDir>/src/inference/$1',
   },
   transform: {
     '^.+\\.ts$': ['ts-jest', {

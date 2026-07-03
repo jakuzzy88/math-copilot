@@ -21,7 +21,8 @@
       "@explanation/*": ["src/explanation/*"],
       "@grammar/*": ["src/grammar/*"],
       "@diagnostics/*": ["src/diagnostics/*"],
-      "@pipeline/*": ["src/pipeline/*"]
+      "@pipeline/*": ["src/pipeline/*"],
+      "@inference/*": ["src/inference/*"]
     },
     "ignoreDeprecations": "6.0"
   },
